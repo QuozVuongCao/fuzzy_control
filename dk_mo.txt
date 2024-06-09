@@ -1,0 +1,415 @@
+<pre><div class="text_to_html">unit Fuzzy;
+// Program by Huynh Thai Hoang
+// Add mftrap, gauss, bell by Nguyen Minh Thien
+interface
+
+uses Dialogs, Sysutils, Math;
+
+const
+   max_input  =4;
+   max_output =2;
+   max_mf_in  =5;
+   max_mf_out =11;
+   max_rule   =625;
+type
+   InDataType   =array[1..max_input] of real;
+   OutDataType  =array[1..max_output] of real;
+
+   MFType=record
+               Name :string;
+               Shape:string;
+               Par  :array[1..4]of real;
+          end;
+
+   InputType=record
+               Name  :string;
+               Range :array[1..2]of real;
+               NumMFs:byte;
+               MF    :array[1..max_mf_in] of MFType;
+           end;
+
+   OutputType=record
+               Name  :string;
+               Range :array[1..2]of real;
+               NumMFs:byte;
+               MF    :array[1..max_mf_out] of MFType;
+           end;
+
+   RuleType =array[1..max_input+max_output] of byte;
+
+   FISType = record
+               Name        :string;      // Name of FIS
+               FType       :string;      // Type of FIS (Sugeno or Mamdani)
+               NumInputs   :byte;        // Number of input
+               NumOutputs  :byte;        // Number of output
+               NumRules    :integer;     // Number of rule
+               AndMethod   :string;
+               OrMethod    :string;
+               ImpMethod   :string;
+               AggMethod   :string;
+               DefuzzMethod:string;
+               Input       :array[1..max_input] of InputType;
+               Output      :array[1..max_output] of OutputType;
+               Rule        :array[1..max_rule] of ruleType;
+             end;
+
+function mftri(xx:real;ll,cc,rr:real):real;     //hinh tam giac
+function mftrap(xx:real;ll,c1,c2,rr:real):real; //hinh thang
+function gauss(xx:real;ww,cc:real):real;        //hinh Gauss
+function bell(xx:real;ll,cc,rr:real):real;      //hinh chuong
+
+procedure MaxMin(FIS:FISType; InValue:InDataType;var OutValue:OutDataType);
+procedure Inference(FIS:FISType; InValue:InDataType; var OutValue:OutDataType);
+
+function ReadFIS(FileName:String; var FIS:FISType):Boolean;
+
+implementation
+
+//******************************************************************************
+//triangular membership function
+//******************************************************************************
+function mftri(xx:real;ll,cc,rr:real):real;
+
+begin
+   mftri:=max(min((xx-ll)/(cc-ll),(rr-xx)/(rr-cc)),0);
+end;
+
+
+//******************************************************************************
+//trapezoid membership function
+//******************************************************************************
+function mftrap(xx:real;ll,c1,c2,rr:real):real;
+var temp:real;
+begin
+   temp:=min((xx-ll)/(c1-ll),1);
+   mftrap:=max(min(temp,(rr-xx)/(rr-c2)),0);
+end;
+
+
+//******************************************************************************
+//Gauss membership function
+//ww: real is wide of membership function
+//******************************************************************************
+function gauss(xx:real;ww,cc:real):real;
+begin
+        gauss:=exp(-(xx-cc)*(xx-cc)/(ww*ww))
+end;
+
+
+//******************************************************************************
+//Bell-shape membership function
+//******************************************************************************
+function bell(xx:real;ll,cc,rr:real):real;
+var temp:real;
+begin
+
+   temp:= exp(2*cc*ln(abs((xx-rr)/ll)));
+   bell:=1/(1+temp);
+end;
+
+
+
+//******************************************************************************
+// fuzzy inference
+//******************************************************************************
+PROCEDURE inference(FIS:FISType; InValue:InDataType;var OutValue:OutDataType);
+var
+   wtsum,weight:real;
+   TempOut:OutDataType;
+   RuleIndex,InputIndex,OutputIndex,MFIndex:byte;
+Begin
+   for OutputIndex:=1 to FIS.NumOutputs do OutValue[OutputIndex]:= 0;
+
+   wtsum:=0;
+   for RuleIndex:=1 to FIS.NumRules do
+      begin
+         weight:=1;
+         for InputIndex:=1 to FIS.NumInputs do
+            begin
+               MFIndex:=FIS.Rule[RuleIndex,InputIndex];
+               if (FIS.Input[InputIndex].MF[MFIndex].shape=&#039;trimf&#039;) then
+                  weight:=weight*mftri(InValue[InputIndex],
+                                       FIS.Input[InputIndex].MF[MFIndex].par[1],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[2],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[3])
+               else
+               if (FIS.Input[InputIndex].MF[MFIndex].shape=&#039;gbellmf&#039;) then
+                  weight:=weight*bell(InValue[InputIndex],
+                                       FIS.Input[InputIndex].MF[MFIndex].par[1],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[2],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[3])
+               else
+               if (FIS.Input[InputIndex].MF[MFIndex].shape=&#039;gaussmf&#039;) then
+                  weight:=weight*gauss(InValue[InputIndex],
+                                       FIS.Input[InputIndex].MF[MFIndex].par[1],
+                                       FIS.Input[InputIndex].MF[MFIndex].par[2])
+                     else
+               if (FIS.Input[InputIndex].MF[MFIndex].shape=&#039;trapmf&#039;) then
+                  weight:=weight*mftrap(InValue[InputIndex],
+                                       FIS.Input[InputIndex].MF[MFIndex].par[1],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[2],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[3],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[4])
+               else ShowMessage(&#039;Unknow input membership function type&#039;);
+
+            end;
+
+         for OutputIndex:=1 to FIS.NumOutputs do
+            begin
+               MFIndex:=FIS.Rule[RuleIndex,FIS.NumInputs+OutputIndex];
+               if(FIS.Output[OutputIndex].MF[MFIndex].shape=&#039;constant&#039;) then
+                  TempOut[OutputIndex]:=weight*
+                                        FIS.Output[OutputIndex].MF[MFIndex].par[1]
+               else ShowMessage(&#039;Unknow output membership function type&#039;);
+            end;
+
+         wtsum:=wtsum + weight;
+         for OutputIndex:=1 to FIS.NumOutputs do
+            OutValue[OutputIndex]:= OutValue[OutputIndex]+TempOut[OutputIndex];
+      end;
+
+   for OutputIndex:=1 to FIS.NumOutputs do
+    OutValue[OutputIndex]:= OutValue[OutputIndex]/wtsum ;
+
+end;//Procedure.
+
+
+
+
+
+
+//******************************************************************************
+// defuzz inference
+//******************************************************************************
+procedure MaxMin(FIS:FISType; InValue:InDataType;var OutValue:OutDataType);
+var
+   wtsum,weight:real;
+   TempOut:OutDataType;
+   RuleIndex,InputIndex,OutputIndex,MFIndex:byte;
+begin
+   for OutputIndex:=1 to FIS.NumOutputs do OutValue[OutputIndex]:= 0;
+
+   //Tinh MIN cac MF cung menh de
+   wtsum:=0;
+   for RuleIndex:=1 to FIS.NumRules do
+      begin
+         weight:=1;
+         for InputIndex:=1 to FIS.NumInputs do
+            begin
+               MFIndex:=FIS.Rule[RuleIndex,InputIndex];
+               if (FIS.Input[InputIndex].MF[MFIndex].shape=&#039;trimf&#039;) then
+                  weight:=min(weight,mftri(InValue[InputIndex],
+                                       FIS.Input[InputIndex].MF[MFIndex].par[1],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[2],
+                                       FIS.Input[InputIndex].MF[MFIndex].Par[3]))
+               else ShowMessage(&#039;Unknow input membership function type&#039;);
+            end;
+
+         for OutputIndex:=1 to FIS.NumOutputs do
+            begin
+               MFIndex:=FIS.Rule[RuleIndex,FIS.NumInputs+OutputIndex];
+               if(FIS.Output[OutputIndex].MF[MFIndex].shape=&#039;constant&#039;) then
+                  TempOut[OutputIndex]:=weight*
+                                        FIS.Output[OutputIndex].MF[MFIndex].par[1]
+               else ShowMessage(&#039;Unknow output membership function type&#039;);
+            end;
+
+         wtsum:=wtsum + weight;
+         for OutputIndex:=1 to FIS.NumOutputs do
+            OutValue[OutputIndex]:= OutValue[OutputIndex]+TempOut[OutputIndex];
+      end;
+
+end;
+
+
+
+//******************************************************************************
+// Read FIS from file FileName (MATLAB Fuzzy Logic Toolbox)
+//******************************************************************************
+function ReadFIS(FileName:String; var FIS:FISType):Boolean;
+var
+   FISFile:TextFile;
+   s,FISStr:string;
+   StrPos1,StrPos2:Integer;
+   i,j,k,NPar:integer;
+
+begin
+   AssignFile(FISFile,FileName);
+   Reset(FISFile);
+   FISStr:=&#039;&#039;;
+   s:=&#039;&#039;;
+   try
+   while not eof(FISFile) do
+        begin
+                Readln(FISFile,s);
+                FISStr:=FISStr+s+chr(10);
+        end;
+   finally
+   CloseFile(FISFile);
+   end;
+   ReadFIS:=True;
+
+   StrPos1:=pos(&#039;[System]&#039;,FISStr);
+      if StrPos1&lt;&gt;1 then
+      begin
+         ReadFIS:=False;
+         ShowMessage(&#039;Fuzzy controller must be stored in MATLAB FIS file.&#039;+
+                      &#039; Load FIS again!&#039;);
+      end
+   else
+      begin
+         StrPos1:=pos(&#039;Name&#039;,FISStr);
+         StrPos2:=pos(&#039;Type&#039;,FISStr);
+         FIS.Name:=copy(FISStr,StrPos1+6,StrPos2-StrPos1-8);
+
+         StrPos1:=pos(&#039;Type&#039;,FISStr);
+         StrPos2:=pos(&#039;Version&#039;,FISStr);
+         FIS.FType:=copy(FISStr,StrPos1+6,StrPos2-StrPos1-8);
+
+         StrPos1:=pos(&#039;NumInputs&#039;,FISStr);
+         StrPos2:=pos(&#039;NumOutputs&#039;,FISStr);
+         FIS.NumInputs:=StrToInt(copy(FISStr,StrPos1+10,StrPos2-StrPos1-11));
+
+         StrPos1:=pos(&#039;NumOutputs&#039;,FISStr);
+         StrPos2:=pos(&#039;NumRules&#039;,FISStr);
+         FIS.NumOutputs:=StrToInt(copy(FISStr,StrPos1+11,StrPos2-StrPos1-12));
+
+         StrPos1:=pos(&#039;NumRules&#039;,FISStr);
+         StrPos2:=pos(&#039;AndMethod&#039;,FISStr);
+         FIS.NumRules:=StrToInt(copy(FISStr,StrPos1+9,StrPos2-StrPos1-10));
+
+         StrPos1:=pos(&#039;AndMethod&#039;,FISStr);
+         StrPos2:=pos(&#039;OrMethod&#039;,FISStr);
+         FIS.AndMethod:=copy(FISStr,StrPos1+11,StrPos2-StrPos1-13);
+
+         StrPos1:=pos(&#039;OrMethod&#039;,FISStr);
+         StrPos2:=pos(&#039;ImpMethod&#039;,FISStr);
+         FIS.OrMethod:=copy(FISStr,StrPos1+10,StrPos2-StrPos1-12);
+
+         StrPos1:=pos(&#039;ImpMethod&#039;,FISStr);
+         StrPos2:=pos(&#039;AggMethod&#039;,FISStr);
+         FIS.ImpMethod:=copy(FISStr,StrPos1+11,StrPos2-StrPos1-13);
+
+         StrPos1:=pos(&#039;AggMethod&#039;,FISStr);
+         StrPos2:=pos(&#039;DefuzzMethod&#039;,FISStr);
+         FIS.AggMethod:=copy(FISStr,StrPos1+11,StrPos2-StrPos1-13);
+
+         StrPos1:=pos(&#039;DefuzzMethod&#039;,FISStr);
+         StrPos2:=pos(&#039;[Input&#039;,FISStr);
+         FIS.DefuzzMethod:=copy(FISStr,StrPos1+14,StrPos2-StrPos1-17);
+
+         FISStr:=copy(FISStr,StrPos2+6,length(FISStr)-StrPos2-5);
+
+         for i:=1 to FIS.NumInputs do
+            begin
+               StrPos1:=pos(&#039;Name&#039;,FISStr);
+               StrPos2:=pos(&#039;Range&#039;,FISStr);
+               FIS.Input[i].Name:=copy(FISStr,StrPos1+6,StrPos2-StrPos1-8);
+
+               StrPos1:=pos(&#039;NumMFs&#039;,FISStr);
+               StrPos2:=pos(&#039;MF1&#039;,FISStr);
+               FIS.Input[i].NumMFs:=StrToInt(copy(FISStr,StrPos1+7,StrPos2-StrPos1-8));
+
+               for j:=1 to FIS.Input[i].NumMFs do
+                  begin
+                     StrPos1:=pos(&#039;MF&#039;+IntToStr(j),FISStr);
+                     FISStr:=copy(FISStr,StrPos1,length(FISStr)-StrPos1+1);
+
+                     StrPos1:=pos(&#039;=&#039;,FISStr);
+                     StrPos2:=pos(&#039;:&#039;,FISStr);
+                     FIS.Input[i].MF[j].Name:=copy(FISStr,StrPos1+2,StrPos2-StrPos1-3);
+
+                     StrPos1:=pos(&#039;:&#039;,FISStr);
+                     StrPos2:=pos(&#039;,&#039;,FISStr);
+                     FIS.Input[i].MF[j].Shape:=copy(FISStr,StrPos1+2,StrPos2-StrPos1-3);
+
+                     NPar:=1;
+                     StrPos1:=pos(&#039;[&#039;,FISStr);
+                     StrPos2:=pos(&#039;]&#039;,FISStr);
+                     for k:=StrPos1 to StrPos2 do
+                        if FISStr[k]=&#039; &#039; then NPar:=NPar+1;
+                     FISStr[StrPos1]:=&#039; &#039;;
+                     FISStr[StrPos2]:=&#039; &#039;;
+                     StrPos1:=pos(&#039; &#039;,FISStr);
+                     k:=0;
+
+                     repeat
+                        k:=k+1;
+                        FISStr:=copy(FISStr,StrPos1+1,length(FISStr)-StrPos1);
+                        StrPos1:=pos(&#039; &#039;,FISStr);
+                        FIS.Input[i].MF[j].Par[k]:=StrToFloat(copy(FISStr,1,StrPos1));
+                     until k=NPar;
+
+                  end;  //for j:=1....
+
+               StrPos2:=pos(&#039;[Input&#039;,FISStr);
+               FISStr:=copy(FISStr,StrPos2+6,length(FISStr)-StrPos2-5);
+            end;       //for i:=1....
+
+         StrPos2:=pos(&#039;[Output&#039;,FISStr);
+         FISStr:=copy(FISStr,StrPos2+6,length(FISStr)-StrPos2+5);
+
+         for i:=1 to FIS.NumOutputs do
+            begin
+               StrPos1:=pos(&#039;Name&#039;,FISStr);
+               StrPos2:=pos(&#039;Range&#039;,FISStr);
+               FIS.Output[i].Name:=copy(FISStr,StrPos1+6,StrPos2-StrPos1-8);
+
+               StrPos1:=pos(&#039;NumMFs&#039;,FISStr);
+               StrPos2:=pos(&#039;MF1&#039;,FISStr);
+               FIS.Output[i].NumMFs:=StrToInt(copy(FISStr,StrPos1+7,StrPos2-StrPos1-8));
+
+               for j:=1 to FIS.Output[i].NumMFs do
+                  begin
+                     StrPos1:=pos(&#039;MF&#039;+IntToStr(j),FISStr);
+                     FISStr:=copy(FISStr,StrPos1+3,length(FISStr)-StrPos1-2);
+
+                     StrPos1:=pos(&#039;=&#039;,FISStr);
+                     StrPos2:=pos(&#039;:&#039;,FISStr);
+                     FIS.Output[i].MF[j].Name:=copy(FISStr,StrPos1+2,StrPos2-StrPos1-3);
+
+                     StrPos1:=pos(&#039;:&#039;,FISStr);
+                     StrPos2:=pos(&#039;,&#039;,FISStr);
+                     FIS.Output[i].MF[j].Shape:=copy(FISStr,StrPos1+2,StrPos2-StrPos1-3);
+
+                     StrPos1:=pos(&#039;,&#039;,FISStr);
+                     StrPos2:=pos(chr(10),FISStr);
+                     FIS.Output[i].MF[j].Par[1]:=StrToFloat(copy(FISStr,StrPos1+1,StrPos2-StrPos1-1));
+
+                  end;  //for j:=1....
+
+               StrPos2:=pos(&#039;[Output&#039;,FISStr);
+               FISStr:=copy(FISStr,StrPos2+6,length(FISStr)-StrPos2-5);
+            end;       //for i:=1....
+
+         StrPos1:=pos(&#039;[Rules]&#039;,FISStr);
+         FISStr:=copy(FISStr,StrPos1,length(FISStr)-StrPos1+1);
+
+         for i:=1 to FIS.NumRules do
+            begin
+               StrPos1:=pos(chr(10),FISStr);
+               FISStr:=copy(FISStr,StrPos1,length(FISStr)-StrPos1+1);
+
+               StrPos1:=pos(&#039;,&#039;,FISStr);
+
+               FISStr[1]:=&#039; &#039;;
+               FISStr[StrPos1]:=&#039; &#039;;
+               for j:=1 to FIS.NumInputs+FIS.NumOutputs do
+                  begin
+                     StrPos1:=pos(&#039; &#039;,FISStr);
+                     FISStr:=copy(FISStr,StrPos1+1,length(FISStr)-StrPos1);
+                     StrPos1:=pos(&#039; &#039;,FISStr);
+                     FIS.Rule[i,j]:=StrToInt(copy(FISStr,1,StrPos1-1));
+                     if j=FIS.NumInputs then
+                        begin
+                           StrPos1:=pos(&#039; &#039;,FISStr);
+                           FISStr:=copy(FISStr,StrPos1+1,length(FISStr)-StrPos1);
+                        end
+                  end;
+            end;  //for i:=1 to FIS.NumRules do
+      end;
+end;
+
+
+end.
+</div></pre>
